@@ -16,9 +16,7 @@
 // chrome.debugger extension API.
 // https://developer.chrome.com/extensions/debugger
 
-[
-  Conditional=ENABLE_DEBUGGER
-] interface DebugHub {
+interface DebugHub {
   readonly attribute CValView cVal;
 
   DebugConsoleMode getDebugConsoleMode();
