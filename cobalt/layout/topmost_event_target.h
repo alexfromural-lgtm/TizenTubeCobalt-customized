@@ -15,6 +15,7 @@
 #ifndef COBALT_LAYOUT_TOPMOST_EVENT_TARGET_H_
 #define COBALT_LAYOUT_TOPMOST_EVENT_TARGET_H_
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -68,6 +69,11 @@ class TopmostEventTarget {
   // has been set as part of the compatibility mapping steps defined at
   // https://www.w3.org/TR/pointerevents/#compatibility-mapping-with-mouse-events.
   std::set<std::string> mouse_event_prevent_flags_;
+
+  // Tracks the client coordinates at pointerdown for each active pointer.
+  // Used to compute tap-slop distance and suppress accidental click events
+  // when the user is attempting to scroll on a touch screen.
+  std::map<uint32_t, math::Vector2dF> pointer_down_coordinates_;
 };
 
 }  // namespace layout

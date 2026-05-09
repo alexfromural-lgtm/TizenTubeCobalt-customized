@@ -471,6 +471,13 @@ bool ShouldConsiderElementAndChildren(dom::Element* element,
 
 }  // namespace
 
+// Minimum distance in viewport pixels a touch pointer must travel between
+// pointerdown and pointerup to be treated as a drag rather than a tap.
+// When this threshold is exceeded the click event is suppressed, preventing
+// accidental video selection while the user is attempting to scroll.
+// This mirrors Android's ViewConfiguration.getTouchSlop() concept.
+const float kTapSlopThreshold = 40.0f;
+
 void TopmostEventTarget::ConsiderElement(dom::Element* element,
                                          const math::Vector2dF& coordinate,
                                          bool consider_only_fixed_elements) {
@@ -570,6 +577,13 @@ void TopmostEventTarget::HandleScrollState(
   if (pointer_event->type() == base::Tokens::pointerdown()) {
     CancelScrollsInParentNavItems(target_element);
 
+    // Record the initial touch coordinates for tap-slop tracking.
+    // We only care about touch pointer types (not mouse/pen) since those
+    // are the inputs that cause the scroll-vs-click ambiguity on tablets.
+    if (pointer_event->pointer_type() == "touch") {
+      pointer_down_coordinates_[pointer_id] = pointer_coordinates;
+    }
+
     auto initial_possible_scroll_targets =
         FindPossibleScrollTargets(target_element);
     pointer_state->SetPossibleScrollTargets(
@@ -637,6 +651,8 @@ void TopmostEventTarget::HandleScrollState(
     pointer_state->ClearClientCoordinates(pointer_id);
     pointer_state->ClearTimeStamp(pointer_id);
     pointer_state->ClearMatrix(pointer_id);
+    // Clear tap-slop tracking entry for this pointer.
+    pointer_down_coordinates_.erase(pointer_id);
   }
 }
 
@@ -762,12 +778,36 @@ void TopmostEventTarget::MaybeSendPointerEvents(
     // This is an 'up' event for the last pressed button indicating that no
     // more buttons are pressed.
     if (target_element && !is_touchpad_event) {
-      // Send the click event if needed, which is not prevented by cancelling
-      // the pointerdown event.
-      //   https://www.w3.org/TR/uievents/#event-type-click
-      //   https://www.w3.org/TR/pointerevents/#compatibility-mapping-with-mouse-events
-      target_element->DispatchEvent(
-          new dom::MouseEvent(base::Tokens::click(), view, event_init));
+      // For touch pointers, suppress the click event if the finger traveled
+      // further than kTapSlopThreshold since pointerdown. This prevents
+      // accidental video opens when the user is trying to scroll a shelf row
+      // that is not registered as a Cobalt NavItem (e.g. YouTube JS shelves).
+      bool suppress_click_due_to_drag = false;
+      if (pointer_event && pointer_event->pointer_type() == "touch") {
+        uint32_t pid = pointer_event->pointer_id();
+        auto it = pointer_down_coordinates_.find(pid);
+        if (it != pointer_down_coordinates_.end()) {
+          math::Vector2dF drag(
+              pointer_event->client_x() - it->second.x(),
+              pointer_event->client_y() - it->second.y());
+          if (drag.Length() >= kTapSlopThreshold) {
+            suppress_click_due_to_drag = true;
+          }
+        }
+      }
+      // Erase the tracking entry — the pointer is being released.
+      if (pointer_event) {
+        pointer_down_coordinates_.erase(pointer_event->pointer_id());
+      }
+
+      if (!suppress_click_due_to_drag) {
+        // Send the click event if needed, which is not prevented by cancelling
+        // the pointerdown event.
+        //   https://www.w3.org/TR/uievents/#event-type-click
+        //   https://www.w3.org/TR/pointerevents/#compatibility-mapping-with-mouse-events
+        target_element->DispatchEvent(
+            new dom::MouseEvent(base::Tokens::click(), view, event_init));
+      }
     }
     if (target_element && (pointer_event->pointer_type() != "mouse")) {
       // If it's not a mouse event, then releasing the last button means
