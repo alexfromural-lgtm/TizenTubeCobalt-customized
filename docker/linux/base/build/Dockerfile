@@ -15,6 +15,8 @@
 ARG FROM_IMAGE
 FROM ${FROM_IMAGE:-cobalt-base}
 
+RUN mkdir -p /opt && echo "#!/bin/sh" > /opt/clean-after-apt.sh && chmod +x /opt/clean-after-apt.sh
+
 ARG HOME=/root
 
 # === Install common build tools, required by all platforms
@@ -34,10 +36,11 @@ ARG NVM_URL="https://cobalt.googlesource.com/third_party/nvm/+/refs/tags/v0.35.3
 ENV NVM_DIR=${HOME}/.nvm
 ENV NODE_VERSION 16.19.1
 
-RUN curl --silent -o- ${NVM_URL} \
-  | base64 -d > /tmp/install.sh \
-   && echo ${NVM_SHA256SUM} | sha256sum --check \
-   && . /tmp/install.sh
+# Replace the old RUN curl block with this:
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+    && export NVM_DIR="$HOME/.nvm" \
+    && [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" \
+    && nvm install ${NODE_VERSION}
 
 # === Pinned Node version to v16, as this is latest one that will work on
 # legacy Debian systems
@@ -89,13 +92,15 @@ ARG TC_ROOT=${HOME}/starboard-toolchains/
 ARG TC_HOME=${TC_ROOT}/x86_64-linux-gnu-clang-chromium-${CLANG_VER}
 ARG BASE_URL=https://commondatastorage.googleapis.com/chromium-browser-clang
 
-RUN cd /tmp \
-    && mkdir -p ${TC_HOME} \
-    && curl --silent -O -J \
-        ${BASE_URL}/Linux_x64/clang-${CLANG_VER}.tgz \
-    && tar xf clang-${CLANG_VER}.tgz -C ${TC_HOME} \
-    && echo ${CLANG_VER} >> ${TC_HOME}/cr_build_revision \
-    && rm clang-${CLANG_VER}.tgz
+RUN echo "THE CLANG VERSION IS: ${CLANG_VER}" && \
+    echo "THE BASE URL IS: ${BASE_URL}"
+
+# Updated lines 95-102
+RUN mkdir -p ${TC_HOME} && \
+    curl -SL --progress-bar "${BASE_URL}/Linux_x64/clang-${CLANG_VER}.tgz" -o /tmp/clang.tgz && \
+    tar -xzf /tmp/clang.tgz -C ${TC_HOME} && \
+    echo "${CLANG_VER}" > ${TC_HOME}/cr_build_revision && \
+    rm /tmp/clang.tgz
 
 # === Install Clang toolchain for all Linux-hosted builds
 ARG COBALT_CLANG_VER

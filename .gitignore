@@ -10,3 +10,5 @@
 _certs/
 .coverage
 compile_commands.json
+/third_party
+.env

@@ -16,7 +16,9 @@ ARG BASE_OS
 ARG BASE_OS_TAG
 FROM ${BASE_OS:-marketplace.gcr.io/google/debian11}:${BASE_OS_TAG:-latest}
 
-COPY base/clean-after-apt.sh /opt/clean-after-apt.sh
+RUN mkdir -p /opt && echo "#!/bin/sh" > /opt/clean-after-apt.sh && chmod +x /opt/clean-after-apt.sh
+
+COPY linux/base/clean-after-apt.sh /opt/clean-after-apt.sh
 
 ENV PYTHONUNBUFFERED 1
 
