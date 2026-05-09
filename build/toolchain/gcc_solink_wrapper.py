@@ -13,8 +13,10 @@ does not have a POSIX-like shell (e.g. Windows).
 import argparse
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 
 import wrapper_utils
 
@@ -163,10 +165,48 @@ def main():
     return 0
 
   # First, run the actual link.
+  # Work-around for Docker on Windows: the linker (clang++) uses C-level
+  # file I/O which cannot create files on NTFS bind-mounted volumes. We
+  # redirect the -o output to /tmp and copy to the real path afterwards.
   command = wrapper_utils.CommandToRun(args.command)
+  tmp_sofile = None
+  real_sofile = args.sofile
+  real_sofile_abs = os.path.abspath(real_sofile)
+  if '-o' in command:
+    tmp_fd, tmp_sofile = tempfile.mkstemp(suffix='.so', dir='/tmp')
+    os.close(tmp_fd)
+    os.unlink(tmp_sofile)  # Let the linker create it fresh
+    # Replace the token right after -o with the /tmp path
+    new_command = list(command)
+    skip_next = False
+    for idx, token in enumerate(new_command):
+      if skip_next:
+        new_command[idx] = tmp_sofile
+        skip_next = False
+      elif token == '-o':
+        skip_next = True
+      elif os.path.abspath(token) == real_sofile_abs:
+        # Replace bare sofile reference (e.g. at end of command)
+        new_command[idx] = tmp_sofile
+    command = new_command
+
   result = wrapper_utils.RunLinkWithOptionalMapFile(command,
                                                     env=fast_env,
                                                     map_file=args.map_file)
+
+  if tmp_sofile:
+    if result == 0 and os.path.exists(tmp_sofile):
+      # Copy from /tmp to the real bind-mounted destination
+      dest_dir = os.path.dirname(real_sofile_abs)
+      if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+      shutil.copy2(tmp_sofile, real_sofile)
+      # Restore args.sofile to real path for readelf/nm/strip below
+      args.sofile = real_sofile
+    try:
+      os.unlink(tmp_sofile)
+    except OSError:
+      pass
 
   if result != 0:
     return result
